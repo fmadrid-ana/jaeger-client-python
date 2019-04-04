@@ -23,7 +23,7 @@ sys.path.append(modpath.__path__[0])
 
 __version__ = '3.13.1.dev0'
 
-from .tracer import Tracer  # noqa
+from .tracer_2 import Tracer  # noqa
 from .config import Config  # noqa
 from .span import Span  # noqa
 from .span_context import SpanContext  # noqa
