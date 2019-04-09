@@ -16,8 +16,10 @@ logger.addHandler(logging.StreamHandler(sys.stdout))
 
 def do_jaeger(ioloop=None):
   logger.info('initialize called')
-  os.environ['JAEGER_AGENT_HOST'] = 'localhost'
-  os.environ['JAEGER_AGENT_PORT'] = '6831'
+  if 'JAEGER_AGENT_HOST' not in os.environ:
+    os.environ['JAEGER_AGENT_HOST'] = 'localhost'
+  if 'JAEGER_AGENT_PORT' not in os.environ:
+    os.environ['JAEGER_AGENT_PORT'] = '6831'
   config = Config({
     'service_name': 'jaeger',
     'enabled': True,
