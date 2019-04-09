@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 
-from .span import Span, SpanContext
+from .span import Span
+from .span_context import SpanContext
 from .scope import Scope
 
 
@@ -9,11 +10,9 @@ class ScopeManager(object):
     a :class:`Span` and access to an active :class:`Span`/:class:`Scope`.
     """
     def __init__(self, span=None, scope=None):
-        # TODO: `tracer` should not be None, but we don't have a reference;
-        # should we move the NOOP SpanContext, Span, Scope to somewhere
-        # else so that they're globally reachable?
-        self._span = span if span else Span(None, SpanContext(), 'None')
+        self._span = span if span else Span(None, None, None, None)
         self._scope = scope if scope else Scope(self, self._span)
+        self.active = self._span
 
     def activate(self, span, finish_on_close):
         """Makes a :class:`Span` active.
@@ -25,7 +24,8 @@ class ScopeManager(object):
             *span*. It is a programming error to neglect to call
             :meth:`Scope.close()` on the returned instance.
         """
-        return self._scope
+        self.active = Scope(self, span, finish_on_close)
+        return self.active
 
     @property
     def active(self):
@@ -39,3 +39,7 @@ class ScopeManager(object):
             available.
         """
         return self._scope
+
+    @active.setter
+    def active(self, scope):
+        self._scope = scope

@@ -20,7 +20,7 @@ import threading
 
 import opentracing
 from opentracing.propagation import Format
-from . import Tracer
+from .tracer_2 import Tracer
 from .local_agent_net import LocalAgentSender
 from .throttler import RemoteThrottler
 from .reporter import (
@@ -135,10 +135,6 @@ class Config(object):
     @property
     def service_name(self):
         return self._service_name
-
-    @property
-    def metrics(self):
-        return self._metrics
 
     @property
     def error_reporter(self):

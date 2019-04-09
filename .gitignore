@@ -57,3 +57,5 @@ perf.svg
 .idea/
 
 crossdock/jaeger-docker-compose.yml
+
+.vscode

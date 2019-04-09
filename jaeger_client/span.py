@@ -20,7 +20,7 @@ import time
 
 import opentracing
 from opentracing.ext import tags as ext_tags
-from . import codecs, thrift
+from . import codecs, thrift, logs
 from .constants import SAMPLED_FLAG, DEBUG_FLAG
 
 
@@ -199,3 +199,16 @@ class Span(opentracing.Span):
         else:
             self.log(event=message)
         return self
+
+    def _on_error(self, exc_type, exc_val, exc_tb):
+        if not exc_val:
+            return
+
+        self.set_tag(ext_tags.ERROR, True)
+        self.log_kv({
+            logs.EVENT: ext_tags.ERROR,
+            logs.MESSAGE: str(exc_val),
+            logs.ERROR_OBJECT: exc_val,
+            logs.ERROR_KIND: exc_type,
+            logs.STACK: exc_tb,
+        })

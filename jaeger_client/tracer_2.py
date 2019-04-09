@@ -4,15 +4,89 @@ from .scope import Scope
 from .span_context import SpanContext
 from .scope_manager import ScopeManager
 import time
-import collections import namedtuple
+from collections import namedtuple
+
+from . import constants
+from .metrics import Metrics, LegacyMetricsFactory
+import random, os
+from opentracing import Format, UnsupportedFormatException
+from .codecs import TextCodec, ZipkinCodec, ZipkinSpanFormat, BinaryCodec
+from .utils import local_ip
+import socket, logging, sys
+logger = logging.getLogger('jaeger_tracing')
 
 class Tracer(Tracer_v1):
 
-  def __init__(self, scope_manager=None):
-    self._scope_manager = ScopeManager() if scope_manager is None else scope_manager
-    # self._span_context = SpanContext()
-    self._span = self.start_active_span('main')
-    # self._scope = Scope(self._scope_manager, self._noop_span)
+  def __init__(
+    self, service_name, reporter, sampler, metrics=None,
+    metrics_factory=None,
+    trace_id_header=constants.TRACE_ID_HEADER,
+    generate_128bit_trace_id=False,
+    baggage_header_prefix=constants.BAGGAGE_HEADER_PREFIX,
+    debug_id_header=constants.DEBUG_ID_HEADER_KEY,
+    one_span_per_rpc=False, extra_codecs=None,
+    tags=None,
+    max_tag_value_length=constants.MAX_TAG_VALUE_LENGTH,
+    throttler=None,
+  ):
+    self.service_name = service_name
+    self.reporter = reporter
+    self.sampler = sampler
+    self.metrics_factory = metrics_factory or LegacyMetricsFactory(metrics or Metrics())
+    self.metrics = TracerMetrics(self.metrics_factory)
+    self.random = random.Random(time.time() * (os.getpid() or 1))
+    self.debug_id_header = debug_id_header
+    self.one_span_per_rpc = one_span_per_rpc
+    self.max_tag_value_length = max_tag_value_length
+    self.max_trace_id_bits = constants._max_trace_id_bits if generate_128bit_trace_id \
+        else constants._max_id_bits
+    self.codecs = {
+        Format.TEXT_MAP: TextCodec(
+            url_encoding=False,
+            trace_id_header=trace_id_header,
+            baggage_header_prefix=baggage_header_prefix,
+            debug_id_header=debug_id_header,
+        ),
+        Format.HTTP_HEADERS: TextCodec(
+            url_encoding=True,
+            trace_id_header=trace_id_header,
+            baggage_header_prefix=baggage_header_prefix,
+            debug_id_header=debug_id_header,
+        ),
+        Format.BINARY: BinaryCodec(),
+        ZipkinSpanFormat: ZipkinCodec(),
+    }
+    if extra_codecs:
+        self.codecs.update(extra_codecs)
+    self.tags = {
+        constants.JAEGER_VERSION_TAG_KEY: constants.JAEGER_CLIENT_VERSION,
+    }
+    if tags:
+        self.tags.update(tags)
+
+    if self.tags.get(constants.JAEGER_IP_TAG_KEY) is None:
+        self.tags[constants.JAEGER_IP_TAG_KEY] = local_ip()
+
+    if self.tags.get(constants.JAEGER_HOSTNAME_TAG_KEY) is None:
+        try:
+            hostname = socket.gethostname()
+            self.tags[constants.JAEGER_HOSTNAME_TAG_KEY] = hostname
+        except socket.error:
+            logger.exception('Unable to determine host name')
+
+    self.throttler = throttler
+    if self.throttler:
+        client_id = random.randint(0, sys.maxsize)
+        self.throttler._set_client_id(client_id)
+        self.tags[constants.CLIENT_UUID_TAG_KEY] = client_id
+
+    self.reporter.set_process(
+        service_name=self.service_name,
+        tags=self.tags,
+        max_length=self.max_tag_value_length,
+    )
+
+    self._scope_manager = ScopeManager(span=self.start_span('main'), scope=None)
     
   @property
   def scope_manager(self):
@@ -78,12 +152,8 @@ class Tracer(Tracer_v1):
     :return: a :class:`Scope`, already registered via the
         :class:`ScopeManager`.
     """
-    return Scope(operation_name, 
-      child_of if child_of else None, 
-      references if references else [], 
-      tags if tags else {}, 
-      start_time if start_time else time.time()
-    )
+    span = self.start_span(operation_name=operation_name, child_of=child_of, references=references)
+    return Scope(self._scope_manager, span)
 
   def start_span(self,
                     operation_name=None,
@@ -190,4 +260,25 @@ def follows_from(referenced_context=None):
         type=ReferenceType.FOLLOWS_FROM,
         referenced_context=referenced_context)
 
-    
+class TracerMetrics(object):
+  """Tracer specific metrics."""
+
+  def __init__(self, metrics_factory):
+      self.traces_started_sampled = \
+          metrics_factory.create_counter(name='jaeger:traces',
+                                          tags={'state': 'started', 'sampled': 'y'})
+      self.traces_started_not_sampled = \
+          metrics_factory.create_counter(name='jaeger:traces',
+                                          tags={'state': 'started', 'sampled': 'n'})
+      self.traces_joined_sampled = \
+          metrics_factory.create_counter(name='jaeger:traces',
+                                          tags={'state': 'joined', 'sampled': 'y'})
+      self.traces_joined_not_sampled = \
+          metrics_factory.create_counter(name='jaeger:traces',
+                                          tags={'state': 'joined', 'sampled': 'n'})
+      self.spans_started_sampled = \
+          metrics_factory.create_counter(name='jaeger:started_spans', tags={'sampled': 'y'})
+      self.spans_started_not_sampled = \
+          metrics_factory.create_counter(name='jaeger:started_spans', tags={'sampled': 'n'})
+      self.spans_finished = \
+          metrics_factory.create_counter(name='jaeger:finished_spans')

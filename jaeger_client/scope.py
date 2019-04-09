@@ -13,10 +13,12 @@ class Scope():
     :param span: the :class:`Span` used for this :class:`Scope`.
     :type span: Span
     """
-    def __init__(self, manager, span):
+    def __init__(self, manager, span, close_on_finish=True):
         """Initializes a scope for *span*."""
         self._manager = manager
         self._span = span
+        self.__close_on_finish = close_on_finish
+
 
     @property
     def span(self):
@@ -38,7 +40,8 @@ class Scope():
         NOTE: Calling this method more than once on a single :class:`Scope`
         leads to undefined behavior.
         """
-        self._manager.active = None
+        if not self.__close_on_finish:
+            self._manager.active = None
 
     def __enter__(self):
         """Allows :class:`Scope` to be used inside a Python Context Manager."""
